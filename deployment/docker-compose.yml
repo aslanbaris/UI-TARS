@@ -1,0 +1,172 @@
+version: '3.8'
+
+services:
+  # Nginx Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: uitars-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api-gateway
+    networks:
+      - uitars-network
+    restart: unless-stopped
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: uitars-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - MODEL_SERVICE_URL=http://model-service:8081
+      - PARSER_SERVICE_URL=http://parser-service:8082
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://uitars:${DB_PASSWORD}@postgres:5432/uitars
+    depends_on:
+      - model-service
+      - parser-service
+      - redis
+      - postgres
+    networks:
+      - uitars-network
+    restart: unless-stopped
+
+  # Model Serving (with GPU support)
+  model-service:
+    build:
+      context: ./model-service
+      dockerfile: Dockerfile
+    container_name: uitars-model-service
+    ports:
+      - "8081:8080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - CUDA_GRAPHS=0
+      - PAYLOAD_LIMIT=8000000
+      - MAX_INPUT_LENGTH=65536
+      - MAX_TOTAL_TOKENS=65537
+      - HF_TOKEN=${HF_TOKEN}
+      - MODEL_ID=ByteDance-Seed/UI-TARS-1.5-7B
+    volumes:
+      - model-cache:/data
+    networks:
+      - uitars-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Parser Service
+  parser-service:
+    build:
+      context: ./parser-service
+      dockerfile: Dockerfile
+    container_name: uitars-parser-service
+    ports:
+      - "8082:8000"
+    environment:
+      - EXECUTOR_SERVICE_URL=http://executor-service:8083
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - executor-service
+      - redis
+    networks:
+      - uitars-network
+    restart: unless-stopped
+
+  # PyAutoGUI Executor
+  executor-service:
+    build:
+      context: ./executor-service
+      dockerfile: Dockerfile
+    container_name: uitars-executor-service
+    ports:
+      - "8083:8000"
+      - "5900:5900"  # VNC port
+    environment:
+      - DISPLAY=:99
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://uitars:${DB_PASSWORD}@postgres:5432/uitars
+      - S3_ENDPOINT=${S3_ENDPOINT}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY}
+      - S3_SECRET_KEY=${S3_SECRET_KEY}
+      - S3_BUCKET=uitars-screenshots
+    volumes:
+      - screenshots:/app/screenshots
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - uitars-network
+    restart: unless-stopped
+    shm_size: 2gb
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: uitars-postgres
+    environment:
+      - POSTGRES_DB=uitars
+      - POSTGRES_USER=uitars
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - uitars-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uitars"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: uitars-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - uitars-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  model-cache:
+    driver: local
+  screenshots:
+    driver: local
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  uitars-network:
+    driver: bridge
