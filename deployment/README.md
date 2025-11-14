@@ -2,6 +2,46 @@
 
 Complete containerized deployment setup for UI-TARS GUI automation system.
 
+## 📚 Documentation Index
+
+**Choose your deployment path:**
+
+- 🚀 **[QUICK_START.md](QUICK_START.md)** - Quick commands and common operations
+- 🧪 **[Testing without GPU](#testing-without-gpu)** - Use mock model service (see below)
+- 📖 **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)** - Complete deployment guide with troubleshooting
+- ✅ **[TESTING_RESULTS.md](TESTING_RESULTS.md)** - Validation results and test reports
+- 🏗️ **[Production Setup](#-quick-start)** - GPU-based production deployment (this page)
+
+---
+
+## 🧪 Testing Without GPU
+
+For development and testing **without GPU requirements**, use the mock model service:
+
+```bash
+# Use test configuration (no GPU needed)
+docker compose -f docker-compose.test.yml up -d
+
+# Check health
+curl http://localhost:9080/health | jq
+
+# Run automated tests
+python3 test_standalone.py
+
+# Stop services
+docker compose -f docker-compose.test.yml down
+```
+
+**Test Environment Ports:** 9080-9083, 9090 (to avoid conflicts)
+
+See **[QUICK_START.md](QUICK_START.md)** for complete testing guide.
+
+---
+
+## 🏭 Production Deployment (GPU Required)
+
+The following sections describe **production deployment** with GPU support:
+
 ## 🏗️ Architecture
 
 ```
